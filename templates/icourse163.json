@@ -1,0 +1,63 @@
+{
+  "siteId": "icourse163",
+  "siteName": "中国大学MOOC",
+  "urlPatterns": [
+    "https://www.icourse163.org/mooc/main/newExam*"
+  ],
+  "urlRegex": "^https?://www\\.icourse163\\.org/mooc/main/newExam",
+  "version": "1.0.1",
+  "createdAt": "2026-05-17",
+  "lastUpdated": "2026-05-17",
+  "description": "中国大学MOOC（icourse163.org）在线考试系统，Ant Design组件库，CSS Modules动态类名。支持单选/多选/判断/填空",
+  "selectors": {
+    "questionContainer": "[class*='moocQuestionContainer']",
+    "questionTypes": {
+      "judge": {
+        "container": "[class*='moocQuestionContainer']:has(.ant-tag-gold)",
+        "title": "[class*='questionInfo']",
+        "optionsContainer": "[class*='option__']",
+        "optionItem": "[class*='option__']",
+        "optionInput": "input[type='radio']",
+        "optionLabel": "[class*='optionContent']",
+        "optionLabelPattern": "^([A-Z])[\\.\\、\\s]",
+        "clickTarget": ".ant-radio-wrapper input"
+      },
+      "single": {
+        "container": "[class*='moocQuestionContainer']:has(.ant-radio-group)",
+        "title": "[class*='questionInfo']",
+        "optionsContainer": "[class*='option__']",
+        "optionItem": "[class*='option__']",
+        "optionInput": "input[type='radio']",
+        "optionLabel": "[class*='optionContent']",
+        "optionLabelPattern": "^([A-Z])[\\.\\、\\s]",
+        "clickTarget": ".ant-radio-wrapper input"
+      },
+      "multiple": {
+        "container": "[class*='moocQuestionContainer']:has(.ant-checkbox-group)",
+        "title": "[class*='questionInfo']",
+        "optionsContainer": "[class*='option__']",
+        "optionItem": "[class*='option__']",
+        "optionInput": "input[type='checkbox']",
+        "optionLabel": "[class*='optionContent']",
+        "optionLabelPattern": "^([A-Z])[\\.\\、\\s]",
+        "clickTarget": ".ant-checkbox-wrapper input"
+      },
+      "fill": {
+        "container": "[class*='moocQuestionContainer']:has(input[type='text'], textarea)",
+        "title": "[class*='questionInfo']",
+        "inputsContainer": "[class*='questionBody']",
+        "inputs": "input[type='text'], textarea"
+      }
+    },
+    "questionIndex": "[class*='index__']",
+    "questionTypeTag": ".ant-tag"
+  },
+  "features": {
+    "hasQuestionIndex": true,
+    "hasTypeAttribute": false,
+    "inputsHidden": true,
+    "needClickWrapper": true,
+    "autoScrollSupport": true
+  },
+  "notes": "icourse163使用Ant Design组件库，CSS Modules动态hash。用:has(.ant-tag-gold)区分判断题型(.ant-tag-green=单选, .ant-tag-blue=多选, .ant-tag-gold=判断, .ant-tag-*=填空)。input隐藏，需点击wrapper触发选中。"
+}

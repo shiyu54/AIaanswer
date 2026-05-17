@@ -9,6 +9,94 @@
   let isRunning = false;
   let config = null;
 
+  // ---- 题库 & 记忆系统 ----
+  const BANK_KEY = "aiQuestionBank";
+  let _bankCache = null;
+
+  async function _getBank() {
+    if (_bankCache) return _bankCache;
+    const d = await chrome.storage.local.get(BANK_KEY);
+    _bankCache = d[BANK_KEY] || {};
+    return _bankCache;
+  }
+  async function _saveBank() {
+    if (_bankCache) await chrome.storage.local.set({ [BANK_KEY]: _bankCache });
+  }
+  async function _pruneBank(max = 2000) {
+    const b = await _getBank();
+    const ks = Object.keys(b);
+    if (ks.length <= max) return;
+    const sorted = ks.map(k => ({ k, t: b[k].lastUsed || 0 })).sort((a, b) => a.t - b.t);
+    for (const { k } of sorted.slice(0, ks.length - max)) delete b[k];
+    await _saveBank();
+  }
+
+  async function lookupBank(text) {
+    const key = text.substring(0, 120);
+    const bank = await _getBank();
+    if (bank[key]) { bank[key].count++; bank[key].lastUsed = Date.now(); await _saveBank(); return { hit: true, ...bank[key] }; }
+    for (const [sk, rec] of Object.entries(bank)) {
+      if (key.includes(sk) || sk.includes(key)) { rec.count++; rec.lastUsed = Date.now(); await _saveBank(); return { hit: true, ...rec }; }
+    }
+    return { hit: false };
+  }
+
+  async function saveToBank(text, answer, type, explanation) {
+    const key = text.substring(0, 120);
+    const bank = await _getBank();
+    if (bank[key]) { bank[key].count++; bank[key].lastUsed = Date.now(); }
+    else { bank[key] = { question: text, answer, type: type || "single", explanation: explanation || "", count: 1, createdAt: Date.now(), lastUsed: Date.now() }; }
+    await _saveBank(); _pruneBank(2000);
+  }
+
+  async function getBankStats() {
+    const e = Object.values(await _getBank());
+    return { total: e.length, totalHits: e.reduce((s, x) => s + (x.count || 0), 0) };
+  }
+
+  async function getBankEntries() {
+    return Object.values(await _getBank()).map(e => ({ ...e, hash: e.question ? e.question.substring(0, 120) : "" })).sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0));
+  }
+
+  async function deleteBankEntry(hash) {
+    const bank = await _getBank();
+    if (bank[hash]) delete bank[hash];
+    else { for (const k of Object.keys(bank)) { if (bank[k].question && bank[k].question.substring(0, 120) === hash) { delete bank[k]; break; } } }
+    await _saveBank();
+  }
+
+  async function clearBank() { _bankCache = {}; await chrome.storage.local.remove(BANK_KEY); }
+  // ---- 题库结束 ----
+  // ---- 答题历史记录 ----
+  const HISTORY_KEY = "aiAnswerHistory";
+  
+  async function saveAnswerHistory(questionText, answer, type, source) {
+    try {
+      const d = await chrome.storage.local.get(HISTORY_KEY);
+      const list = d[HISTORY_KEY] || [];
+      list.push({
+        time: Date.now(),
+        question: questionText.substring(0, 300),
+        answer: Array.isArray(answer) ? answer.join(", ") : String(answer),
+        type: type || "single",
+        source: source || "AI",  // "AI" or "bank"
+      });
+      // 最多保留 500 条
+      if (list.length > 500) list.splice(0, list.length - 500);
+      await chrome.storage.local.set({ [HISTORY_KEY]: list });
+    } catch(e) { console.warn("[AI答题助手] 保存历史失败:", e); }
+  }
+
+  async function getAnswerHistory() {
+    const d = await chrome.storage.local.get(HISTORY_KEY);
+    return (d[HISTORY_KEY] || []).slice(-200).reverse();
+  }
+
+  async function clearAnswerHistory() {
+    await chrome.storage.local.remove(HISTORY_KEY);
+  }
+  // ---- 历史记录结束 ----
+
   // Question selectors for common exam platforms
   const QUESTION_SELECTORS = [
     // 通用选择器
@@ -17,8 +105,13 @@
     ".exam-question",
     ".test-question",
     ".quiz-question",
+    ".topic",
+    ".subject",
+    ".rowQuestion",
     '[class*="question"]',
     '[class*="Question"]',
+    '[class*="topic"]',
+    '[class*="subject"]',
     // 题目容器
     ".problem",
     ".problem-item",
@@ -27,11 +120,22 @@
     // 表单题目
     "form .item",
     "form .form-item",
+    "form .field",
     // 列表题目
     ".question-list > li",
     ".question-list > div",
     "ol.questions > li",
     "ul.questions > li",
+    // 行内题目
+    ".field-group",
+    ".question-group",
+    ".exam-content > div",
+    ".test-content > div",
+    // 通用卡片/条目
+    ".card.question",
+    ".list-item.question",
+    '.el-card:has(input)',
+    '.el-form-item:has(input)',
   ];
 
   // Option selectors
@@ -83,6 +187,24 @@
           isRunning,
         });
         break;
+      case "getBankStats":
+        getBankStats().then(s => sendResponse(s));
+        return true;
+      case "getBankEntries":
+        getBankEntries().then(e => sendResponse(e));
+        return true;
+      case "deleteBankEntry":
+        deleteBankEntry(message.hash).then(() => sendResponse({ success: true }));
+        return true;
+      case "clearBank":
+        clearBank().then(() => sendResponse({ success: true }));
+        return true;
+      case "getAnswerHistory":
+        getAnswerHistory().then(h => sendResponse(h));
+        return true;
+      case "clearAnswerHistory":
+        clearAnswerHistory().then(() => sendResponse({ success: true }));
+        return true;
     }
     return true;
   });
@@ -245,6 +367,7 @@
     const textInputs = element.querySelectorAll(
       'input[type="text"], input:not([type]), textarea'
     );
+    const selects = element.querySelectorAll("select");
 
     if (radios.length > 0) {
       question.type = "single";
@@ -252,6 +375,18 @@
     } else if (checkboxes.length > 0) {
       question.type = "multiple";
       question.options = parseOptions(element, checkboxes);
+    } else if (selects.length > 0) {
+      question.type = "single";
+      question.options = Array.from(selects[0].options)
+        .filter(opt => opt.value && opt.value !== "")
+        .map((opt, i) => ({
+          element: selects[0],
+          label: String.fromCharCode(65 + i),
+          text: opt.text.trim(),
+          value: opt.value,
+        }));
+      // 把 select 本身也存下来用于后续填写
+      question.selectElement = selects[0];
     } else if (textInputs.length > 0) {
       question.type = "fill";
       question.inputs = Array.from(textInputs);
@@ -330,34 +465,51 @@
     return options;
   }
 
-  // Heuristic question detection
+  // Heuristic question detection — 智能扫描，不再遍历所有DOM
   function detectQuestionsHeuristically() {
-    const detected = [];
-    const allElements = document.body.querySelectorAll("*");
+    const results = [];
 
-    // Look for numbered items that might be questions
-    const numberPattern = /^[\d一二三四五六七八九十]+[\.\、\s]/;
+    // 优先级1: 层叠式容器选择器（逐个试，不卡）
+    const patterns = [
+      ".question-item", ".question", ".exam-question", ".test-question",
+      ".quiz-question", ".problem", ".problem-item",
+      '[class*="questionList"] > *', '[class*="question-list"] > *',
+      '[class*="examContent"] > *', '[class*="quizContent"] > *',
+      "ol > li", "ul > li",
+    ];
+    for (const sel of patterns) {
+      let items;
+      try { items = document.querySelectorAll(sel); } catch { continue; }
+      if (items.length < 2) continue;
+      let v = 0;
+      for (const el of items) {
+        if (el.querySelectorAll('input[type="radio"],input[type="checkbox"],input[type="text"],textarea,select').length > 0
+            && (el.textContent || "").trim().length > 5) v++;
+      }
+      if (v < 2) continue;
+      for (const el of items) { const q = parseQuestion(el, results.length); if (q) results.push(q); }
+      if (results.length > 0) break;
+    }
 
-    allElements.forEach((el, index) => {
-      const text = el.textContent.trim();
-      if (text.length > 20 && text.length < 2000 && numberPattern.test(text)) {
-        // Check if it has options or inputs
-        const hasOptions =
-          el.querySelectorAll('input[type="radio"], input[type="checkbox"]')
-            .length > 0;
-        const hasInputs =
-          el.querySelectorAll('input[type="text"], textarea').length > 0;
-
-        if (hasOptions || hasInputs) {
-          const question = parseQuestion(el, detected.length);
-          if (question) {
-            detected.push(question);
+    // 优先级2: 兜底 — 只扫描包含 input/select 的容器
+    if (results.length === 0) {
+      const seen = new Set();
+      document.querySelectorAll(
+        'input[type="radio"],input[type="checkbox"],input[type="text"],textarea,input:not([type]),select'
+      ).forEach(inp => {
+        let cur = inp.parentElement;
+        for (let d = 0; cur && d < 4; cur = cur.parentElement, d++) {
+          const text = (cur.textContent || "").trim();
+          if (text.length > 15) {
+            const key = cur.tagName + "." + (cur.className || "") + "#" + (cur.id || "");
+            if (!seen.has(key)) { seen.add(key); const q = parseQuestion(cur, results.length); if (q) results.push(q); }
+            break;
           }
         }
-      }
-    });
+      });
+    }
 
-    return detected;
+    return results;
   }
 
   // 统一的DOM精简逻辑，去掉无关属性
@@ -528,61 +680,31 @@
         ? "本次提供的是经过前端筛选的疑似题目块，请基于这些块识别题目结构。"
         : "未找到足够的候选题目块，以下为整页精简HTML。";
 
-    const prompt = `分析以下HTML页面，识别所有题目的结构。
+    const prompt = `分析以下HTML页面，识别ALL题目的结构。
 
-【重要】只需要识别题目结构，不需要给出答案！
+规则：
+1. 检查HTML中每一个包含input[radio]/input[checkbox]/input[text]/textarea/select的元素
+2. 每道题必须提取完整的题干文本（text字段），仔细找附近的文本节点
+3. 如果题干在HTML中有点击展开、data属性、aria-label等，优先使用
+4. 尽量找全所有题目，不要遗漏
+5. 每道题必须包含：index, type, text
+6. 单选/多选必须有options数组（每个option含label, text, selector）
+7. 填空题必须有inputs数组（每个input含selector）
+8. selector必须精确，能直接用document.querySelector定位
+9. 【不要返回答案】，只识别结构
 
-请返回JSON格式：
+严格以下JSON格式返回，不要其他内容：
 {
   "success": true,
   "questions": [
     {
       "index": 0,
       "type": "single",
-      "text": "题目文本内容（完整的题干）",
-      "options": [
-        {
-          "label": "A",
-          "text": "选项内容",
-          "selector": "精确的CSS选择器"
-        }
-      ]
-    },
-    {
-      "index": 1,
-      "type": "multiple",
-      "text": "多选题文本",
-      "options": [
-        {
-          "label": "A",
-          "text": "选项内容",
-          "selector": "CSS选择器"
-        }
-      ]
-    },
-    {
-      "index": 2,
-      "type": "fill",
-      "text": "填空题文本",
-      "inputs": [
-        { "selector": "第1个输入框的CSS选择器" },
-        { "selector": "第2个输入框的CSS选择器" }
-      ]
+      "text": "完整题干",
+      "options": [{ "label": "A", "text": "选项", "selector": "精确CSS选择器" }]
     }
   ]
 }
-
-重要说明：
-1. type: "single"单选题, "multiple"多选题, "fill"填空题
-2. text: 必须包含完整的题干内容，后续需要用这个文本去获取答案
-3. selector: 必须是可以直接用document.querySelector()定位到的精确CSS选择器
-   - 优先使用id选择器: #elementId
-   - 或使用class+nth-child: .option-item:nth-child(2)
-   - 或使用属性选择器: input[value="B"], input[name="q1"][value="2"]
-   - 对于radio/checkbox，选择器应指向input元素本身
-   - 对于可点击的div/label，选择器应指向该可点击元素
-4. 仔细分析HTML结构，确保选择器准确无误
-5. 【不要返回答案】这一步只需要识别题目结构
 
 ${contentIntro}
 
@@ -751,9 +873,17 @@ ${payload}`;
       );
 
       try {
-        // 逐题调用AI获取答案
-        sendLog("info", `正在获取第 ${i + 1} 题的答案...`);
-        const answer = await getAIAnswerForQuestion(question);
+        // 查记忆 → 命中直接复用
+        const memHit = await lookupBank(question.text);
+        let answer;
+        if (memHit.hit) {
+          answer = { type: memHit.type || question.type, answer: memHit.answer, explanation: memHit.explanation || "（题库复用）" };
+          sendLog("success", `第 ${i + 1} 题命中题库 ✅ (已复用${memHit.count}次)`);
+          saveAnswerHistory(question.text, memHit.answer, question.type, "题库");
+        } else {
+          sendLog("info", `正在获取第 ${i + 1} 题的答案...`);
+          answer = await getAIAnswerForQuestion(question);
+        }
 
         if (answer && answer.answer) {
           question.answer = answer.answer;
@@ -762,6 +892,11 @@ ${payload}`;
           question.answered = true;
           answeredCount++;
           updateStats();
+          // 存入题库（仅新题）并记入历史
+          if (!memHit.hit) {
+            saveToBank(question.text, answer.answer, question.type, answer.explanation);
+            saveAnswerHistory(question.text, answer.answer, question.type, "AI");
+          }
           // 发送统计
           chrome.runtime.sendMessage({
             action: "trackStats",
@@ -903,8 +1038,11 @@ ${payload}`;
 
   // 直接应用答案（使用AI返回的选择器）
   async function applyAnswerDirectly(question) {
+    console.log("[AI答题助手] applyAnswerDirectly type=" + question.type + " text=" + (question.text||"").substring(0,30));
     switch (question.type) {
       case "single":
+      case "judge":
+      case "select":
         await applySingleAnswerDirectly(question);
         break;
       case "multiple":
@@ -918,10 +1056,27 @@ ${payload}`;
 
   // 单选题 - 直接点击对应选项
   async function applySingleAnswerDirectly(question) {
+    console.log("[AI答题助手] applySingleAnswerDirectly type=" + question.type + " answer=" + question.answer + " options=" + (question.options||[]).length);
     const answerLetter = String(question.answer).toUpperCase();
 
+    // 下拉选择框（select）
+    if (question.selectElement) {
+      for (const option of question.options) {
+        if (option.label.toUpperCase() === answerLetter) {
+          question.selectElement.value = option.value;
+          question.selectElement.dispatchEvent(new Event("change", { bubbles: true }));
+          console.log(`[AI答题助手] 下拉已选择: ${option.label} (${option.value})`);
+          return;
+        }
+      }
+    }
+
     for (const option of question.options) {
-      if (option.label.toUpperCase() === answerLetter) {
+      // 匹配字母或文字（如判断题AI可能返回"正确"而非"A"）
+      const matches = option.label.toUpperCase() === answerLetter ||
+        option.text.includes(answerLetter) ||
+        answerLetter.includes(option.text.replace(/\s+/g, ""));
+      if (matches) {
         // 优先使用已解析的element
         let element = option.element;
 
@@ -1145,14 +1300,18 @@ ${payload}`;
     const labels = {
       single: "单选题",
       multiple: "多选题",
+      judge: "判断题",
       fill: "填空题",
+      select: "下拉题",
     };
     return labels[type] || type;
   }
 
   // Parse AI response
   function parseAIResponse(responseText) {
-    // Try to extract JSON from response
+    if (!responseText || typeof responseText !== "string") {
+      throw new Error("AI返回内容为空");
+    }
     let jsonStr = responseText;
 
     // Handle markdown code blocks
@@ -1161,14 +1320,29 @@ ${payload}`;
       jsonStr = jsonMatch[1];
     }
 
-    // Try to find JSON object
-    const objMatch = jsonStr.match(/\{[\s\S]*\}/);
+    // Try to find JSON object or array
+    const objMatch = jsonStr.match(/\{[\s\S]*\}/) || jsonStr.match(/\[[\s\S]*\]/);
     if (objMatch) {
       jsonStr = objMatch[0];
     }
 
-    const parsed = JSON.parse(jsonStr);
-    return parsed;
+    // Attempt 1: direct parse
+    try { const p = JSON.parse(jsonStr); if (p && (p.answer || p.questions || Array.isArray(p))) return p; } catch(e) {}
+
+    // Attempt 2: fix trailing commas, unquoted keys
+    try {
+      const fixed = jsonStr
+        .replace(/,\s*}/g, "}")
+        .replace(/,\s*\]/g, "]")
+        .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?\s*:/g, '"$2":');
+      return JSON.parse(fixed);
+    } catch(e) {}
+
+    // Attempt 3: extract answer via regex (single question fallback)
+    const ansMatch = jsonStr.match(/"answer"\s*:\s*"([^"]+)"/);
+    if (ansMatch) return { type: "single", answer: ansMatch[1], explanation: "(原始响应提取)" };
+
+    throw new Error("无法解析AI响应: " + responseText.substring(0, 200));
   }
 
   // Apply answer to question
@@ -1256,22 +1430,82 @@ ${payload}`;
     if (element.tagName === "INPUT") {
       const inputType = element.type?.toLowerCase();
       if (inputType === "radio" || inputType === "checkbox") {
-        // 优先尝试点击关联的label（腾讯问卷需要这样）
+        // 优先尝试点击关联的label
         if (element.id) {
           const label = document.querySelector(`label[for="${element.id}"]`);
           if (label) {
             console.log("[AI答题助手] 找到关联label，点击label");
+            // 直接点击label（标准HTML行为）
             label.click();
-            await sleep(50);
-            // 验证是否成功
+            await sleep(100);
             if (element.checked) {
               console.log("[AI答题助手] 通过label点击成功");
+              return;
+            }
+            // label点击无效，用MouseEvent完整模拟
+            label.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+            label.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+            label.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+            await sleep(100);
+            if (element.checked) {
+              console.log("[AI答题助手] 通过MouseEvent点击成功");
+              return;
+            }
+            // 直接触发input上的click
+            element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+            element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+            element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            await sleep(50);
+            if (element.checked) {
+              console.log("[AI答题助手] 通过input MouseEvent点击成功");
               return;
             }
           }
         }
 
-        // 如果没有label或label点击无效，直接设置checked
+        // Ant Design: 点击 wrapper 触发 React 事件（input 隐藏时必需）
+        if (!element.checked) {
+          const adWrapper = element.closest('.ant-checkbox-wrapper, .ant-radio-wrapper');
+          if (adWrapper) {
+            console.log("[AI答题助手] 找到Ant Design wrapper，点击wrapper");
+            adWrapper.click();
+            await sleep(80);
+            if (element.checked) {
+              console.log("[AI答题助手] 通过wrapper点击成功");
+              return;
+            }
+          }
+        }
+
+        // 章节测试: 点击父级 li 触发事件
+        if (!element.checked) {
+          const parentLi = element.closest('li.f-cb');
+          if (parentLi) {
+            console.log("[AI答题助手] 点击父级li, id=" + element.id + " label=" + (document.querySelector('label[for="' + element.id + '"]') ? 'found' : 'not found'));
+            // 依次尝试 li 本身和里面的 label
+            parentLi.click();
+            await sleep(50);
+            if (element.checked) {
+              console.log("[AI答题助手] 通过li点击成功");
+              return;
+            }
+            console.log("[AI答题助手] li点击后element.checked=" + element.checked);
+            // 尝试 li 内的 label
+            const liLabel = parentLi.querySelector('label[for]');
+            if (liLabel) {
+              console.log("[AI答题助手] 点击li内的label");
+              liLabel.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+              await sleep(50);
+              if (element.checked) {
+                console.log("[AI答题助手] 通过li内label点击成功");
+                return;
+              }
+              console.log("[AI答题助手] li内label点击后element.checked=" + element.checked);
+            }
+          }
+        }
+
+        // 兜底：直接设置checked
         element.checked = true;
       }
       element.dispatchEvent(

@@ -161,6 +161,15 @@
         const labelEl = optionEl.querySelector(typeSelectors.optionLabel);
         let optionText = labelEl ? labelEl.textContent.trim() : "";
 
+        // 图标类名转文字（icourse163判断题用图标代替文字）
+        if (!optionText) {
+          const iconEl = optionEl.querySelector('.u-icon-correct, .u-icon-wrong, .u-icon-true, .u-icon-false');
+          if (iconEl) {
+            if (iconEl.classList.contains('u-icon-correct') || iconEl.classList.contains('u-icon-true')) optionText = "正确";
+            else if (iconEl.classList.contains('u-icon-wrong') || iconEl.classList.contains('u-icon-false')) optionText = "错误";
+          }
+        }
+
         // 提取选项字母
         let optionLabel = String.fromCharCode(65 + idx); // 默认A, B, C...
 

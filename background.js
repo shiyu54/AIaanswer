@@ -71,26 +71,54 @@ async function callAI(config, prompt, mode = 'answer') {
 只返回JSON格式，不要有其他内容。确保JSON格式正确。`
   };
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: model,
-      messages: [
-        {
-          role: 'system',
-          content: systemPrompts[mode] || systemPrompts.answer
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-    })
-  });
+  // 超时：分析模式给 120s，答题模式 30s，防挂起
+  const TIMEOUT = mode === 'analyze' ? 120000 : 30000;
+
+  // 兼容旧版 Chrome（AbortSignal.timeout 需要 Chrome 103+）
+  let controller;
+  let signal;
+  try {
+    signal = AbortSignal.timeout(TIMEOUT);
+  } catch (e) {
+    controller = new AbortController();
+    signal = controller.signal;
+    setTimeout(() => controller.abort(), TIMEOUT);
+  }
+
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompts[mode] || systemPrompts.answer
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+      }),
+      signal,
+    });
+  } catch (fetchError) {
+    // 网络层面的错误（DNS/连接拒绝/超时/离线等）
+    const msg = fetchError.message || '';
+    if (msg.includes('timeout') || msg.includes('Timeout') || fetchError.name === 'TimeoutError' || fetchError.name === 'AbortError') {
+      throw new Error('API请求超时，请检查网络连接或增大超时设置');
+    } else if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+      throw new Error('无法连接到API服务器，请检查: 1)网络连接 2)代理设置 3)API地址是否正确');
+    } else {
+      throw new Error(`网络错误: ${msg}`);
+    }
+  }
 
   if (!response.ok) {
     const errorText = await response.text();

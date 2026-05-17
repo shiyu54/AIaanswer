@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "AI自动答题助手",
+  "name": "AIaanswer",
   "version": "1.0.0",
-  "description": "智能识别网页题目，通过AI自动答题",
+  "description": "AI\u81ea\u52a8\u7b54\u9898\u52a9\u624b \u2014 \u667a\u80fd\u8bc6\u522b\u7f51\u9875\u9898\u76ee\uff0c\u901a\u8fc7AI\u81ea\u52a8\u4f5c\u7b54",
   "permissions": [
     "activeTab",
     "storage",
@@ -10,7 +10,9 @@
     "declarativeNetRequest",
     "sidePanel"
   ],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "action": {
     "default_icon": {
       "128": "icons/icon128.png"
@@ -27,20 +29,28 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "<all_urls>"
+      ],
       "js": [
         "modules/site-matcher.js",
         "modules/template-manager.js",
         "modules/scanner-enhanced.js",
         "content.js"
       ],
-      "css": ["content.css"]
+      "css": [
+        "content.css"
+      ]
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["templates/*.json"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "templates/*.json"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }

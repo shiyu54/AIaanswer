@@ -9,6 +9,18 @@ const scanBtn = document.getElementById("scanBtn");
 const startBtn = document.getElementById("startBtn");
 const startBtnText = document.getElementById("startBtnText");
 
+// 题库
+const bankStatCard = document.getElementById("bankStatCard");
+const bankCount = document.getElementById("bankCount");
+const bankModal = document.getElementById("bankModal");
+const closeBankBtn = document.getElementById("closeBankBtn");
+const closeBankBackdrop = document.getElementById("closeBankBackdrop");
+const bankSearch = document.getElementById("bankSearch");
+const bankList = document.getElementById("bankList");
+const bankTotalLabel = document.getElementById("bankTotalLabel");
+const bankHitsLabel = document.getElementById("bankHitsLabel");
+const clearBankBtn = document.getElementById("clearBankBtn");
+
 // Settings Modal Elements
 const settingsModal = document.getElementById("settingsModal");
 const openSettingsBtn = document.getElementById("openSettingsBtn");
@@ -42,11 +54,22 @@ let hasScanned = false;
 // Built-in default model
 const BUILTIN_MODEL = {
   id: "builtin-default",
-  name: "默认",
-  baseUrl: "https://d.yikfun.de5.net/",
-  apiKey: "default",
-  model: "Doubao-1.5-pro",
+  name: "内置",
+  baseUrl: "",
+  apiKey: "",
+  model: "",
   builtin: true,
+};
+
+// OpenCode Go 预配置模型
+const OPENCODE_MODEL = {
+  id: "opencode-go",
+  name: "OpenCode Go",
+  baseUrl: "https://opencode.ai/zen/go/v1",
+  apiKey: "",
+  model: "deepseek-v4-flash",
+  builtin: false,
+  recommended: true,
 };
 
 // Initialize
@@ -161,14 +184,14 @@ async function initModels() {
 
 async function getAllModels() {
   const data = await chrome.storage.sync.get(["aiModels"]);
-  return [BUILTIN_MODEL, ...(data.aiModels || [])];
+  return [BUILTIN_MODEL, OPENCODE_MODEL, ...(data.aiModels || [])];
 }
 
 async function getActiveModel() {
   const data = await chrome.storage.sync.get(["activeModelId"]);
   const models = await getAllModels();
-  const activeId = data.activeModelId || BUILTIN_MODEL.id;
-  return models.find((m) => m.id === activeId) || BUILTIN_MODEL;
+  const activeId = data.activeModelId || OPENCODE_MODEL.id;
+  return models.find((m) => m.id === activeId) || OPENCODE_MODEL;
 }
 
 async function renderModelList() {
@@ -189,6 +212,7 @@ async function renderModelList() {
         <div class="model-name">
           ${model.name}
           ${model.builtin ? '<span class="model-badge">内置</span>' : ""}
+          ${model.recommended ? '<span class="model-badge recommended">推荐</span>' : ""}
         </div>
         <div class="model-meta">${model.model}</div>
       </div>
@@ -580,10 +604,92 @@ function addLog(type, message) {
   logContent.scrollTop = logContent.scrollHeight;
 }
 
+const showHistoryBtn = document.getElementById("showHistoryBtn");
+const historyModal = document.getElementById("historyModal");
+const closeHistoryBtn = document.getElementById("closeHistoryBtn");
+const closeHistoryBackdrop = document.getElementById("closeHistoryBackdrop");
+const clearHistoryBtn = document.getElementById("clearHistoryBtn");
+const historyList = document.getElementById("historyList");
+const historyStats = document.getElementById("historyStats");
+
+async function renderHistory() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tabs[0]) { historyList.innerHTML = '<div class="bank-empty">请先打开答题页面</div>'; return; }
+  try {
+    const entries = await chrome.tabs.sendMessage(tabs[0].id, { action: "getAnswerHistory" });
+    if (!entries || !entries.length) {
+      historyList.innerHTML = '<div class="bank-empty">暂无记录</div>';
+      historyStats.textContent = "共 0 条";
+      return;
+    }
+    historyStats.textContent = `共 ${entries.length} 条，最近 ${Math.min(entries.length, 200)} 条`;
+    historyList.innerHTML = entries.map(e => {
+      const t = new Date(e.time).toLocaleTimeString("zh-CN", { hour12: false });
+      const typeLabel = ({single:"单选",multiple:"多选",fill:"填空",judge:"判断"})[e.type]||e.type;
+      return `<div class="bank-item"><div class="bank-item-row"><span class="bank-item-type ${e.type}">${typeLabel}</span><span class="bank-item-ans">✅ ${esc(e.answer)}</span><span class="bank-item-count">${e.source || ""}</span></div><div class="bank-item-q" style="font-size:12px;color:var(--text-secondary);margin:0">${esc(e.question||"").substring(0,200)}</div><div class="bank-item-row" style="margin-top:4px"><span style="font-size:11px;color:#888">${t}</span></div></div>`;
+    }).join("");
+  } catch(e) {
+    historyList.innerHTML = '<div class="bank-empty">加载失败</div>';
+  }
+}
+
+showHistoryBtn.addEventListener("click", () => { historyModal.classList.add("open"); renderHistory(); });
+closeHistoryBtn.addEventListener("click", () => historyModal.classList.remove("open"));
+closeHistoryBackdrop.addEventListener("click", () => historyModal.classList.remove("open"));
+clearHistoryBtn.addEventListener("click", async () => {
+  if (!confirm("确定清空全部记录？")) return;
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tabs[0]) await chrome.tabs.sendMessage(tabs[0].id, { action: "clearAnswerHistory" });
+  historyList.innerHTML = '<div class="bank-empty">已清空</div>';
+  historyStats.textContent = "共 0 条";
+});
+
 clearLogBtn.addEventListener("click", () => {
   logContent.innerHTML = "";
   addLog("info", "日志已清空");
 });
+
+// --- 题库 ---
+function bankSend(action, extra = {}) {
+  return new Promise(r => {
+    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+      if (!tab) return r(null);
+      chrome.tabs.sendMessage(tab.id, { action, ...extra }, res => r(chrome.runtime.lastError ? null : res));
+    });
+  });
+}
+
+async function refreshBankStats() {
+  const s = await bankSend("getBankStats");
+  if (s) bankCount.textContent = s.total || 0;
+}
+
+async function renderBankList(filter = "") {
+  const entries = await bankSend("getBankEntries");
+  if (!entries) { bankList.innerHTML = '<div class="bank-empty">请先打开答题页面</div>'; return; }
+  let f = filter ? entries.filter(e => (e.question || "").toLowerCase().includes(filter.toLowerCase())) : entries;
+  bankTotalLabel.textContent = entries.length;
+  bankHitsLabel.textContent = entries.reduce((s, e) => s + (e.count || 0), 0);
+  bankCount.textContent = entries.length;
+  if (!f.length) { bankList.innerHTML = '<div class="bank-empty">无匹配题目</div>'; return; }
+  bankList.innerHTML = f.map(e => `<div class="bank-item"><div class="bank-item-q">${esc(e.question || "(无)").substring(0, 200)}</div><div class="bank-item-row"><span class="bank-item-type ${e.type||"single"}">${({single:"单选",multiple:"多选",fill:"填空"})[e.type]||e.type}</span><span class="bank-item-ans">✅ ${esc(Array.isArray(e.answer)?e.answer.join(", "):String(e.answer))}</span><span class="bank-item-count">复用${e.count||0}次</span><button class="bank-del-btn" data-hash="${esc(e.hash||"")}" title="删除">✕</button></div>${e.explanation?`<div class="bank-item-exp">💡 ${esc(e.explanation)}</div>`:""}</div>`).join("");
+  bankList.querySelectorAll(".bank-del-btn").forEach(btn => btn.addEventListener("click", async e => {
+    e.stopPropagation(); const hash = btn.dataset.hash; if (!hash) return;
+    await bankSend("deleteBankEntry", { hash }); renderBankList(bankSearch.value); refreshBankStats();
+  }));
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]); }
+
+bankStatCard.addEventListener("click", () => { bankModal.classList.add("open"); renderBankList(bankSearch.value); });
+closeBankBtn.addEventListener("click", () => bankModal.classList.remove("open"));
+closeBankBackdrop.addEventListener("click", () => bankModal.classList.remove("open"));
+bankSearch.addEventListener("input", () => renderBankList(bankSearch.value));
+clearBankBtn.addEventListener("click", async () => {
+  if (!confirm("确定清空全部题库？")) return;
+  await bankSend("clearBank"); renderBankList(); refreshBankStats(); addLog("info", "🧹 题库已清空");
+});
+setInterval(refreshBankStats, 5000);
+setTimeout(refreshBankStats, 1000);
 
 // Message Listener
 chrome.runtime.onMessage.addListener((message) => {

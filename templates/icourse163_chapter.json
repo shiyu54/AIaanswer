@@ -1,0 +1,56 @@
+{
+  "siteId": "icourse163_chapter",
+  "siteName": "中国大学MOOC - 章节测试",
+  "urlPatterns": [
+    "https://www.icourse163.org/learn/*",
+    "https://www.icourse163.org/mooc/main/newExam*"
+  ],
+  "urlRegex": "^https?://www\\.icourse163\\.org/(?:learn|mooc/main/newExam)",
+  "version": "1.0.3",
+  "createdAt": "2026-05-17",
+  "lastUpdated": "2026-05-17",
+  "description": "中国大学MOOC（icourse163.org）章节测试页面，非Ant Design架构",
+  "selectors": {
+    "questionContainer": ".m-choiceQuestion.u-questionItem, .m-fillQuestion.u-questionItem",
+    "questionTypes": {
+      "single": {
+        "container": ".m-choiceQuestion.u-questionItem:has(.dan), .m-choiceQuestion.u-questionItem:has(.pan)",
+        "title": ".f-richEditorText.j-richTxt",
+        "optionsContainer": ".choices",
+        "optionItem": "li.f-cb",
+        "optionInput": "input[type='radio']",
+        "optionLabel": ".optionCnt",
+        "optionIndex": ".optionPos",
+        "optionLabelPattern": "^([A-Z])[\\.\\、\\s]",
+        "clickTarget": "label.u-tbl"
+      },
+      "multiple": {
+        "container": ".m-choiceQuestion.u-questionItem:has(.duo)",
+        "title": ".f-richEditorText.j-richTxt",
+        "optionsContainer": ".choices",
+        "optionItem": "li.f-cb",
+        "optionInput": "input[type='checkbox']",
+        "optionLabel": ".optionCnt",
+        "optionIndex": ".optionPos",
+        "optionLabelPattern": "^([A-Z])[\\.\\、\\s]",
+        "clickTarget": "label.u-tbl"
+      },
+      "fill": {
+        "container": ".m-fillQuestion.u-questionItem",
+        "title": ".f-richEditorText.j-richTxt",
+        "inputsContainer": ".j-choicebox",
+        "inputs": "input[type='text'], textarea"
+      }
+    },
+    "questionIndex": ".position",
+    "questionTypeTag": ".dan, .duo, .pan"
+  },
+  "features": {
+    "hasQuestionIndex": true,
+    "hasTypeAttribute": false,
+    "inputsHidden": false,
+    "needClickWrapper": false,
+    "autoScrollSupport": true
+  },
+  "notes": "判断(.pan)合并到single类型处理，结构完全相同（radio按钮）。"
+}

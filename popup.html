@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Answer Bot</title>
+  <title>AIaanswer</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -11,8 +11,12 @@
     <!-- 顶部标题栏 -->
     <header class="app-header">
       <div class="brand">
-        <span class="logo-icon">✦</span>
-        <span class="title">AI Answer Bot</span>
+        <span class="logo-icon">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <path d="M12 2L13.09 8.26L18 6L14.74 10.91L21 12L14.74 13.09L18 18L13.09 15.74L12 22L10.91 15.74L6 18L9.26 13.09L3 12L9.26 10.91L6 6L10.91 8.26L12 2Z" fill="currentColor"/>
+    </svg>
+  </span>
+        <span class="title">AIaanswer</span>
         <div class="status-badge" id="statusBadge">
           <span class="status-dot" id="statusDot"></span>
           <span class="status-text" id="statusText">等待开始</span>
@@ -40,6 +44,10 @@
           <span class="stat-value" id="answeredCount">0</span>
           <span class="stat-label">已完成</span>
         </div>
+        <div class="stat-card" id="bankStatCard" style="cursor:pointer" title="打开题库">
+          <span class="stat-value" id="bankCount">0</span>
+          <span class="stat-label">📚 题库</span>
+        </div>
       </div>
 
       <!-- 操作步骤区 -->
@@ -60,7 +68,10 @@
       <div class="log-section">
         <div class="section-header">
           <span>运行日志</span>
-          <button class="btn-text" id="clearLog">清空</button>
+          <div class="header-actions">
+            <button class="btn-text" id="showHistoryBtn">📋 记录</button>
+            <button class="btn-text" id="clearLog">清空</button>
+          </div>
         </div>
         <div class="log-container" id="logContent">
           <div class="log-item log-info">
@@ -87,6 +98,55 @@
             <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
             <span>添加自定义模型</span>
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 答题历史浮层 -->
+    <div class="modal" id="historyModal">
+      <div class="modal-backdrop" id="closeHistoryBackdrop"></div>
+      <div class="modal-content bank-modal-content">
+        <div class="modal-header">
+          <h3>📋 答题记录</h3>
+          <div class="header-actions">
+            <button class="btn-text" id="clearHistoryBtn" style="color:#ef4444;font-size:12px">清空</button>
+            <button class="icon-btn" id="closeHistoryBtn">
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="modal-body">
+          <div class="bank-stats-row" id="historyStats">加载中...</div>
+          <div class="bank-list" id="historyList">
+            <div class="bank-empty">暂无记录</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 题库浮层 -->
+    <div class="modal" id="bankModal">
+      <div class="modal-backdrop" id="closeBankBackdrop"></div>
+      <div class="modal-content bank-modal-content">
+        <div class="modal-header">
+          <h3>📚 题库</h3>
+          <div class="header-actions">
+            <button class="btn-text" id="clearBankBtn" style="color:#ef4444;font-size:12px">清空全部</button>
+            <button class="icon-btn" id="closeBankBtn">
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="modal-body">
+          <div class="bank-search">
+            <input type="text" id="bankSearch" placeholder="🔍 搜索题目...">
+          </div>
+          <div class="bank-stats-row">
+            <span>共 <strong id="bankTotalLabel">0</strong> 题，累计命中 <strong id="bankHitsLabel">0</strong> 次</span>
+          </div>
+          <div class="bank-list" id="bankList">
+            <div class="bank-empty">暂无题目，答题后自动收录</div>
+          </div>
         </div>
       </div>
     </div>

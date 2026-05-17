@@ -49,6 +49,26 @@
           console.log("[TemplateManager] 内置模板加载成功: 腾讯问卷");
         }
 
+        // 加载中国大学MOOC模板（考试页）
+        const icourseTemplate = await this._fetchTemplate(
+          "/templates/icourse163.json"
+        );
+        if (icourseTemplate) {
+          this.builtInTemplates.push(icourseTemplate);
+          window.siteMatcher.registerTemplate(icourseTemplate);
+          console.log("[TemplateManager] 内置模板加载成功: 中国大学MOOC");
+        }
+
+        // 加载中国大学MOOC模板（章节测试页）
+        const chapterTemplate = await this._fetchTemplate(
+          "/templates/icourse163_chapter.json"
+        );
+        if (chapterTemplate) {
+          this.builtInTemplates.push(chapterTemplate);
+          window.siteMatcher.registerTemplate(chapterTemplate);
+          console.log("[TemplateManager] 内置模板加载成功: 中国大学MOOC-章节测试");
+        }
+
         // TODO: 加载更多内置模板
         // const examTemplate = await this._fetchTemplate('/templates/exam.json');
       } catch (error) {
